@@ -1,0 +1,782 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Coffee Filter Drop Lab</title>
+<style>
+  :root {
+    --bg: #0b1630; --panel: #101f40; --panel2: #13264e; --line: #23396b;
+    --text: #e6ecff; --muted: #8fa3cf; --accent: #6fd3ff; --accent2: #ffb35c;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font: 13px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { padding: 10px 16px; border-bottom: 1px solid var(--line); display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap; }
+  header h1 { font-size: 16px; margin: 0; letter-spacing: .3px; }
+  header span { color: var(--muted); }
+  .app { display: grid; grid-template-columns: 290px 1fr; height: calc(100% - 44px); }
+  aside { border-right: 1px solid var(--line); padding: 12px 14px; overflow-y: auto; background: var(--panel); }
+  aside h2 { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); margin: 14px 0 6px; }
+  .ctl { margin: 8px 0; }
+  .ctl label { display: flex; justify-content: space-between; color: var(--muted); }
+  .ctl label b { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+  input[type=range] { width: 100%; accent-color: var(--accent); }
+  select, input[type=file] { width: 100%; background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 5px; }
+  .btns { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 10px; }
+  button { background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 7px; cursor: pointer; font: inherit; }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: #1d4d7a; border-color: #2f74b3; font-weight: 600; }
+  button.on { border-color: var(--accent2); color: var(--accent2); }
+  .note { color: var(--muted); font-size: 11.5px; margin-top: 10px; }
+  main { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1.35fr 1fr; gap: 8px; padding: 8px; min-height: 0; }
+  .card { position: relative; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; min-height: 0; }
+  .card .title { position: absolute; top: 8px; left: 10px; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; pointer-events: none; z-index: 2; }
+  .card canvas { display: block; width: 100%; height: 100%; }
+  #readout { position: absolute; right: 10px; top: 8px; z-index: 2; font-variant-numeric: tabular-nums; text-align: right; font-size: 12px; line-height: 1.5; pointer-events: none;
+    background: rgba(11,22,48,.65); padding: 6px 9px; border-radius: 6px; }
+  #readout i { color: var(--muted); font-style: normal; }
+  #mcStatus { color: var(--accent2); }
+  @media (max-width: 860px) {
+    .app { grid-template-columns: 1fr; height: auto; }
+    aside { border-right: 0; border-bottom: 1px solid var(--line); }
+    main { grid-template-columns: 1fr; grid-template-rows: 420px 300px 260px 260px; }
+  }
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+<script src="sim.js"></script>
+</head>
+<body>
+<header>
+  <h1>Coffee Filter Drop Lab</h1>
+  <span>How much does an uneven release change the tilt at the bottom? · AP Physics C side project</span>
+</header>
+<div class="app">
+  <aside>
+    <h2>Object</h2>
+    <div class="ctl">
+      <select id="shape">
+        <option value="filter">Nested coffee filters</option>
+        <option value="sphere">Sphere</option>
+        <option value="disc">Flat disc</option>
+        <option value="cube">Cube</option>
+        <option value="custom" disabled>Custom model (upload below)</option>
+      </select>
+    </div>
+    <div class="ctl"><input type="file" id="upload" accept=".obj,.stl"></div>
+    <div class="ctl"><label>Filters in stack (mass = n × 0.95 g) <b id="v-n"></b></label><input type="range" id="n" min="1" max="20" step="1" value="4"></div>
+    <div class="ctl"><label>Drag coefficient C<sub>d</sub> <b id="v-cd"></b></label><input type="range" id="cd" min="0.1" max="2" step="0.001" value="0.255"></div>
+    <div class="ctl"><label>Bendiness (simplified) <b id="v-bend"></b></label><input type="range" id="bend" min="0" max="1" step="0.01" value="0.1"></div>
+
+    <h2>Drop variance</h2>
+    <div class="ctl"><label>Release tilt σ <b id="v-tilt"></b></label><input type="range" id="tilt" min="0" max="20" step="0.5" value="5"></div>
+    <div class="ctl"><label>Release wobble σ <b id="v-spin"></b></label><input type="range" id="spin" min="0" max="90" step="1" value="20"></div>
+    <div class="ctl"><label>Release twist σ <b id="v-yaw"></b></label><input type="range" id="yaw" min="0" max="180" step="1" value="30"></div>
+    <div class="ctl"><label>Drop height <b id="v-height"></b></label><input type="range" id="height" min="0.5" max="5" step="0.05" value="2.5"></div>
+    <div class="ctl"><label>Room drafts (rms) <b id="v-air"></b></label><input type="range" id="air" min="0" max="0.6" step="0.01" value="0.15"></div>
+
+    <div class="btns">
+      <button class="primary" id="drop">Drop it</button>
+      <button id="reset">Reset</button>
+      <button id="slow">Slow-mo</button>
+      <button id="follow" class="on">Follow cam</button>
+      <button id="slicebtn" class="on">Air slice in 3D</button>
+    </div>
+    <div class="btns" style="grid-template-columns:1fr">
+      <button id="mc">Run Monte Carlo (100 drops per point)</button>
+    </div>
+    <div class="note" id="mcStatus"></div>
+    <div class="note">
+      <b>What's real:</b> the right panel is a lattice-Boltzmann fluid sim on a 2D side slice. The air actually flows around the shape. The fall uses the lab's quadratic drag, ½ρC<sub>d</sub>Av².<br>
+      <b>What's simplified:</b> tilt uses a restoring-torque + damping model with random room drafts. Bendiness only weakens that torque and adds flutter. Room air dots in the 3D view are a potential-flow sketch for looks; the glowing slice through the object is the real 2D fluid sim. Rocking comes from the release tilt, drafts, and vortex shedding off alternate sides of the rim.
+    </div>
+  </aside>
+  <main>
+    <div class="card" id="view3d"><div class="title">3D drop · room air, colored by how fast it's pushed</div><div id="readout"></div></div>
+    <div class="card"><div class="title">Airflow · 2D lattice-Boltzmann slice (object frame)</div><canvas id="cfd"></canvas></div>
+    <div class="card"><div class="title">Landing tilt · current settings</div><canvas id="hist"></canvas></div>
+    <div class="card"><div class="title">Landing tilt vs release tilt σ</div><canvas id="sweep"></canvas></div>
+  </main>
+</div>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
+import { STLLoader } from 'three/addons/loaders/STLLoader.js';
+
+const Sim = window.Sim;
+const $ = (id) => document.getElementById(id);
+
+// ---------------- controls ----------------
+const fmt = {
+  n: (v) => v, cd: (v) => (+v).toFixed(3), bend: (v) => (+v).toFixed(2),
+  tilt: (v) => v + '°', spin: (v) => v + '°/s', yaw: (v) => v + '°/s',
+  height: (v) => (+v).toFixed(2) + ' m', air: (v) => (+v).toFixed(2) + ' m/s',
+};
+for (const k in fmt) {
+  const el = $(k);
+  const upd = () => { $('v-' + k).textContent = fmt[k](el.value); };
+  el.addEventListener('input', () => { upd(); onParamChange(k); });
+  upd();
+}
+const val = (id) => parseFloat($(id).value);
+
+// ---------------- bodies ----------------
+const CELL = 0.0025;              // LBM cell size, m
+const R_TOP = 0.0875, R_BOT = 0.04125;
+const PRESETS = {
+  filter: { cd: 0.255 },
+  sphere: { cd: 0.47, lcp: 0.0, flut: 0.01 },
+  disc:   { cd: 1.17, lcp: 0.01, flut: 0.03 },
+  cube:   { cd: 1.05, lcp: 0.05, flut: 0.01 },
+  custom: { cd: 1.0,  lcp: 0.10, flut: 0.008 },
+};
+
+function filterGeometry(h) {
+  const pts = [new THREE.Vector2(0, 0), new THREE.Vector2(R_BOT, 0)];
+  for (let i = 1; i <= 12; i++) pts.push(new THREE.Vector2(R_BOT + (R_TOP - R_BOT) * i / 12, h * i / 12));
+  const g = new THREE.LatheGeometry(pts, 144);
+  const p = g.attributes.position;
+  for (let i = 0; i < p.count; i++) {
+    const x = p.getX(i), y = p.getY(i), z = p.getZ(i);
+    if (y <= 0) continue;
+    const k = 1 + 0.045 * Math.sin(24 * Math.atan2(z, x)) * (y / h);
+    p.setXYZ(i, x * k, y, z * k);
+  }
+  g.computeVertexNormals();
+  return g;
+}
+
+function filterBody(n) {
+  const h = 0.06 + 0.0012 * (n - 1);
+  const body = {
+    A: Math.PI * R_TOP * R_TOP, Aside: (R_TOP + R_BOT) * h, R: R_TOP, h,
+    Lcp: 0.25 * h, Ip: (R_TOP ** 2 + R_BOT ** 2) / 4 + h * h / 12,
+    Iy: (R_TOP ** 2 + R_BOT ** 2) / 2, flut: 0.004,
+  };
+  // 2D side slice: thin cup walls + bottom, about 2 cells thick
+  const pts = [];
+  const seg = (x0, y0, x1, y1) => {
+    const L = Math.hypot(x1 - x0, y1 - y0), nSteps = Math.ceil(L / (CELL * 0.4));
+    for (let i = 0; i <= nSteps; i++) {
+      const t = i / nSteps, x = x0 + (x1 - x0) * t, y = y0 + (y1 - y0) * t;
+      for (let d = 0; d <= 1.6; d += 0.4) pts.push({ x, y: y + d * CELL - h / 2, s: y / h });
+    }
+  };
+  seg(-R_BOT, 0, R_BOT, 0);
+  seg(R_BOT, 0, R_TOP, h); seg(-R_BOT, 0, -R_TOP, h);
+  return { body, pts, geo: filterGeometry(h), h };
+}
+
+function rasterTri(grid, GN, ax, ay, bx, by, cx, cy) {
+  const minx = Math.max(0, Math.floor(Math.min(ax, bx, cx))), maxx = Math.min(GN - 1, Math.ceil(Math.max(ax, bx, cx)));
+  const miny = Math.max(0, Math.floor(Math.min(ay, by, cy))), maxy = Math.min(GN - 1, Math.ceil(Math.max(ay, by, cy)));
+  const d = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
+  if (Math.abs(d) > 1e-9) {
+    for (let j = miny; j <= maxy; j++) for (let i = minx; i <= maxx; i++) {
+      const px = i + 0.5, py = j + 0.5;
+      const w0 = ((bx - px) * (cy - py) - (by - py) * (cx - px)) / d;
+      const w1 = ((cx - px) * (ay - py) - (cy - py) * (ax - px)) / d;
+      if (w0 >= -0.02 && w1 >= -0.02 && w0 + w1 <= 1.02) grid[j * GN + i] = 1;
+    }
+  }
+  // edges too, so edge-on (zero-area) triangles still show up
+  const edge = (x0, y0, x1, y1) => {
+    const n = Math.ceil(Math.hypot(x1 - x0, y1 - y0) * 2) + 1;
+    for (let k = 0; k <= n; k++) {
+      const i = Math.floor(x0 + (x1 - x0) * k / n), j = Math.floor(y0 + (y1 - y0) * k / n);
+      if (i >= 0 && i < GN && j >= 0 && j < GN) grid[j * GN + i] = 1;
+    }
+  };
+  edge(ax, ay, bx, by); edge(bx, by, cx, cy); edge(cx, cy, ax, ay);
+}
+
+function analyzeGeometry(src, preset) {
+  let g = src.index ? src.toNonIndexed() : src.clone();
+  for (const k of Object.keys(g.attributes)) if (k !== 'position') g.deleteAttribute(k);
+  g.computeBoundingBox();
+  const bb = g.boundingBox, size = new THREE.Vector3();
+  bb.getSize(size);
+  g.translate(-(bb.min.x + bb.max.x) / 2, -bb.min.y, -(bb.min.z + bb.max.z) / 2);
+  const sc = 0.175 / Math.max(size.x, size.y, size.z, 1e-9);
+  g.scale(sc, sc, sc);
+  g.computeVertexNormals(); g.computeBoundingBox();
+  const h = Math.max(g.boundingBox.max.y, 0.002);
+  const p = g.attributes.position.array;
+  const GN = 100, OFF = GN / 2;
+  const top = new Uint8Array(GN * GN), side = new Uint8Array(GN * GN);
+  let sx2 = 0, sz2 = 0, sy = 0;
+  const nv = p.length / 3;
+  for (let i = 0; i < p.length; i += 3) { sy += p[i + 1]; }
+  const yc = sy / nv;
+  let sIp = 0;
+  for (let i = 0; i < p.length; i += 3) {
+    const x = p[i], y = p[i + 1], z = p[i + 2];
+    sx2 += x * x; sz2 += z * z; sIp += x * x + (y - yc) * (y - yc);
+  }
+  for (let t = 0; t < p.length; t += 9) {
+    const X = (k) => p[t + k] / CELL + OFF;
+    rasterTri(top, GN, X(0), X(2), X(3), X(5), X(6), X(8));
+    rasterTri(side, GN, X(0), p[t + 1] / CELL, X(3), p[t + 4] / CELL, X(6), p[t + 7] / CELL);
+  }
+  let nTop = 0, nSide = 0;
+  const pts = [];
+  for (let j = 0; j < GN; j++) for (let i = 0; i < GN; i++) {
+    if (top[j * GN + i]) nTop++;
+    if (side[j * GN + i]) {
+      nSide++;
+      const y = (j + 0.5) * CELL;
+      pts.push({ x: (i + 0.5 - OFF) * CELL, y: y - h / 2, s: Math.min(1, y / h) });
+    }
+  }
+  const A = Math.max(nTop * CELL * CELL, 1e-4);
+  const R = Math.sqrt(A / Math.PI);
+  const body = {
+    A, Aside: Math.max(nSide * CELL * CELL, 1e-5), R, h,
+    Lcp: preset.lcp * 2 * R, Ip: Math.max(sIp / nv, 1e-4), Iy: Math.max((sx2 + sz2) / nv, 1e-4), flut: preset.flut,
+  };
+  return { body, pts, geo: g, h };
+}
+
+let customGeo = null;
+function buildShape(kind, n) {
+  if (kind === 'filter') return filterBody(n);
+  let g;
+  if (kind === 'sphere') g = new THREE.SphereGeometry(0.0875, 48, 24);
+  else if (kind === 'disc') g = new THREE.CylinderGeometry(0.0875, 0.0875, 0.004, 64);
+  else if (kind === 'cube') g = new THREE.BoxGeometry(0.12, 0.12, 0.12);
+  else g = customGeo;
+  return analyzeGeometry(g, PRESETS[kind]);
+}
+
+// ---------------- 3D scene ----------------
+const host = $('view3d');
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+host.appendChild(renderer.domElement);
+renderer.domElement.style.display = 'block';
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0b1630);
+scene.fog = new THREE.Fog(0x0b1630, 4, 9);
+const camera = new THREE.PerspectiveCamera(40, 1, 0.01, 50);
+camera.position.set(1.4, 2.2, 1.9);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(0, 1.6, 0);
+controls.enableDamping = true;
+
+const grid = new THREE.GridHelper(4, 40, 0x2c4e8f, 0x172a52);
+scene.add(grid);
+
+// meter stick: 5 m with ticks every 10 cm
+function meterStick() {
+  const c = document.createElement('canvas');
+  c.width = 128; c.height = 4096;
+  const x = c.getContext('2d');
+  x.fillStyle = '#d9c38a'; x.fillRect(0, 0, 128, 4096);
+  x.fillStyle = '#2a2215'; x.font = 'bold 34px sans-serif';
+  for (let cm = 0; cm <= 500; cm += 2) {
+    const y = 4096 - cm / 500 * 4096;
+    const len = cm % 10 === 0 ? 60 : 24;
+    x.fillRect(0, y - 1.5, len, 3);
+    if (cm % 50 === 0 && cm > 0 && cm < 500) x.fillText((cm / 100).toFixed(1), 66, y + 12);
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(0.07, 5), new THREE.MeshBasicMaterial({ map: tex }));
+  m.position.set(-0.45, 2.5, -0.25);
+  return m;
+}
+scene.add(meterStick());
+
+const gradMat = new THREE.ShaderMaterial({
+  side: THREE.DoubleSide,
+  uniforms: { uH: { value: 0.06 } },
+  vertexShader: `
+    uniform float uH; varying float vH; varying vec3 vN; varying vec3 vV;
+    void main() {
+      vH = clamp(position.y / uH, 0.0, 1.0);
+      vN = normalize(normalMatrix * normal);
+      vec4 mv = modelViewMatrix * vec4(position, 1.0);
+      vV = normalize(-mv.xyz);
+      gl_Position = projectionMatrix * mv;
+    }`,
+  fragmentShader: `
+    varying float vH; varying vec3 vN; varying vec3 vV;
+    void main() {
+      vec3 n = normalize(vN);
+      if (!gl_FrontFacing) n = -n;
+      float diff = 0.55 + 0.45 * max(dot(n, normalize(vec3(0.4, 0.8, 0.5))), 0.0);
+      float rim = pow(1.0 - abs(dot(n, normalize(vV))), 2.5);
+      vec3 base = mix(vec3(0.02), vec3(1.0), smoothstep(0.0, 1.0, vH));
+      gl_FragColor = vec4(base * diff + vec3(0.35, 0.6, 1.0) * rim * 0.45, 1.0);
+    }`,
+});
+const pivot = new THREE.Group();
+scene.add(pivot);
+let objMesh = null;
+
+// trail of the drop, colored by speed
+const TRAIL_MAX = 6000;
+const trailGeo = new THREE.BufferGeometry();
+trailGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(TRAIL_MAX * 3), 3));
+trailGeo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(TRAIL_MAX * 3), 3));
+trailGeo.setDrawRange(0, 0);
+scene.add(new THREE.Line(trailGeo, new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.9 })));
+let trailN = 0;
+
+const landRing = new THREE.Mesh(new THREE.RingGeometry(0.09, 0.1, 48), new THREE.MeshBasicMaterial({ color: 0xffb35c, side: THREE.DoubleSide }));
+landRing.rotation.x = -Math.PI / 2; landRing.visible = false;
+scene.add(landRing);
+
+// 3D air particles fixed in the room: still air the object falls through.
+// Near the object: potential flow past a sphere + a lingering wake (visual approximation).
+// Particles live in a window around the object so the air stays dense where it matters.
+const NP3 = 7000, WIN_R = 0.3, WIN_LO = -0.6, WIN_HI = 0.9;
+const p3 = new Float32Array(NP3 * 3), c3 = new Float32Array(NP3 * 3), v3 = new Float32Array(NP3 * 3);
+const airGeo = new THREE.BufferGeometry();
+airGeo.setAttribute('position', new THREE.BufferAttribute(p3, 3));
+airGeo.setAttribute('color', new THREE.BufferAttribute(c3, 3));
+const airPts = new THREE.Points(airGeo, new THREE.PointsMaterial({ size: 0.008, vertexColors: true, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false }));
+airPts.frustumCulled = false;
+scene.add(airPts);
+function spawn3(i, c, ahead) {
+  const r = WIN_R * Math.sqrt(Math.random()), a = Math.random() * Math.PI * 2;
+  p3[i * 3] = c.x + r * Math.cos(a); p3[i * 3 + 2] = c.z + r * Math.sin(a);
+  const dy = ahead ? WIN_LO + Math.random() * 0.08 : WIN_LO + Math.random() * (WIN_HI - WIN_LO);
+  p3[i * 3 + 1] = Math.max(0.003, c.y + dy);
+  v3[i * 3] = v3[i * 3 + 1] = v3[i * 3 + 2] = 0;
+}
+
+function updateAir3(c, U, dt, body) {
+  const a = Math.max(body.R, body.h / 2) * 0.95, a3 = a * a * a;
+  const slowRelax = Math.min(1, dt / 0.4);
+  for (let i = 0; i < NP3; i++) {
+    let x = p3[i * 3] - c.x, y = p3[i * 3 + 1] - c.y, z = p3[i * 3 + 2] - c.z;
+    const rho = Math.hypot(x, z);
+    if (y > WIN_HI || y < WIN_LO - 0.05 || rho > WIN_R + 0.05 || p3[i * 3 + 1] < 0) {
+      spawn3(i, c, y > WIN_HI && y < WIN_HI + 0.25);
+      continue;
+    }
+    const r2 = x * x + y * y + z * z, r = Math.sqrt(r2) + 1e-6;
+    let fx = 0, fy = 0, fz = 0, relax = slowRelax;
+    if (U > 0.01) {
+      // room-frame velocity = object-frame potential flow minus the object's fall speed
+      const k = a3 / (2 * r2 * r), cy = y / r;
+      fx = -U * k * 3 * cy * x / r; fy = -U * k * (3 * cy * cy - 1); fz = -U * k * 3 * cy * z / r;
+      if (y > 0 && rho < a * 1.3) {           // wake: air dragged down behind it, swirling
+        const w = Math.exp(-y / 0.3) * (1 - rho / (a * 1.3));
+        fy = fy * (1 - w) - 0.8 * w * U;
+        fx += w * U * (-z / (rho + 0.01) * 0.5 + (Math.random() - 0.5) * 0.7);
+        fz += w * U * (x / (rho + 0.01) * 0.5 + (Math.random() - 0.5) * 0.7);
+      }
+      if (r < 2.2 * a) relax = 1;             // follow the near field tightly
+    }
+    v3[i * 3] += (fx - v3[i * 3]) * relax;
+    v3[i * 3 + 1] += (fy - v3[i * 3 + 1]) * relax;
+    v3[i * 3 + 2] += (fz - v3[i * 3 + 2]) * relax;
+    x += v3[i * 3] * dt; y += v3[i * 3 + 1] * dt; z += v3[i * 3 + 2] * dt;
+    const rn = Math.hypot(x, y, z);
+    if (rn < a * 0.9) { const s = a * 0.9 / (rn + 1e-6); x *= s; y *= s; z *= s; }
+    p3[i * 3] = x + c.x; p3[i * 3 + 1] = y + c.y; p3[i * 3 + 2] = z + c.z;
+    const sp = Math.hypot(v3[i * 3], v3[i * 3 + 1], v3[i * 3 + 2]);
+    const col = Sim.turbo(Math.min(1, 0.12 + sp / 2.2));
+    c3[i * 3] = col[0] / 255; c3[i * 3 + 1] = col[1] / 255; c3[i * 3 + 2] = col[2] / 255;
+  }
+  airGeo.attributes.position.needsUpdate = true;
+  airGeo.attributes.color.needsUpdate = true;
+}
+
+// ---------------- 2D fluid ----------------
+const LW = 240, LH = 160, CX = LW / 2, CY = 58;
+const lbm = new Sim.LBM(LW, LH, 0.56);
+const cfd = $('cfd'), cctx = cfd.getContext('2d');
+const field = document.createElement('canvas');
+field.width = LW; field.height = LH;
+const fctx = field.getContext('2d');
+const img = fctx.createImageData(LW, LH);
+const sliceCv = document.createElement('canvas');
+sliceCv.width = LW * 3; sliceCv.height = LH * 3;
+const sctx = sliceCv.getContext('2d');
+const sField = document.createElement('canvas');
+sField.width = LW; sField.height = LH;
+const sfctx = sField.getContext('2d'), simg = sfctx.createImageData(LW, LH);
+const NP2 = 3000, TR = 8;
+const px = new Float32Array(NP2), py = new Float32Array(NP2), tr = new Float32Array(NP2 * TR * 2), pv = new Float32Array(NP2);
+let trHead = 0;
+function spawn2(i, anyY) {
+  px[i] = Math.random() * LW; py[i] = anyY ? Math.random() * LH : Math.random() * 3;
+  for (let k = 0; k < TR; k++) { tr[(i * TR + k) * 2] = px[i]; tr[(i * TR + k) * 2 + 1] = py[i]; }
+}
+for (let i = 0; i < NP2; i++) spawn2(i, true);
+const V_REF = 3.2, U_LAT = 0.1, V_SCALE = 5;  // m/s at lattice speed U_LAT; color scale max
+let lastAngle = 1e9, shapePts = [];
+
+function stepFluid(vRel) {
+  const uIn = Math.max(0.004, U_LAT * vRel / V_REF);
+  for (let s = 0; s < 5; s++) lbm.step(uIn);
+  const toMS = vRel / uIn, tmp = [0, 0];
+  trHead = (trHead + 1) % TR;
+  for (let i = 0; i < NP2; i++) {
+    lbm.sample(px[i], py[i], tmp);
+    px[i] += tmp[0] * 10; py[i] += tmp[1] * 10;
+    if (px[i] < 0) px[i] += LW; else if (px[i] >= LW) px[i] -= LW;
+    pv[i] = Math.hypot(tmp[0], tmp[1]) * toMS;
+    const gi = Math.floor(py[i]) * LW + Math.floor(px[i]);
+    if (py[i] >= LH - 1 || py[i] < 0 || lbm.solid[gi] || Math.random() < 0.002) { spawn2(i, py[i] >= LH - 1 ? false : true); continue; }
+    tr[(i * TR + trHead) * 2] = px[i]; tr[(i * TR + trHead) * 2 + 1] = py[i];
+  }
+  return toMS;
+}
+
+function drawFluid(toMS, vRel) {
+  const d = img.data, sd = simg.data, ux = lbm.ux, uy = lbm.uy, sol = lbm.solid, sh = lbm.shade;
+  for (let y = 0; y < LH; y++) for (let x = 0; x < LW; x++) {
+    const i = y * LW + x, o = ((LH - 1 - y) * LW + x) * 4;
+    if (sol[i]) {
+      const g = 10 + sh[i] * 0.94;
+      d[o] = g; d[o + 1] = g; d[o + 2] = g + 6;
+    } else {
+      const c = Sim.turbo(Math.hypot(ux[i], uy[i]) * toMS / V_SCALE);
+      d[o] = 11 + (c[0] - 11) * 0.3; d[o + 1] = 22 + (c[1] - 22) * 0.3; d[o + 2] = 48 + (c[2] - 48) * 0.3;
+      sd[o] = c[0] * 0.28; sd[o + 1] = c[1] * 0.28; sd[o + 2] = c[2] * 0.28;
+    }
+    if (sol[i]) sd[o] = sd[o + 1] = sd[o + 2] = 0;
+    d[o + 3] = 255; sd[o + 3] = 255;
+  }
+  fctx.putImageData(img, 0, 0);
+  const W = cfd.width, H = cfd.height;
+  cctx.imageSmoothingEnabled = true;
+  cctx.drawImage(field, 0, 0, W, H);
+  drawTrails(cctx, W, H);
+  if (sliceOn) {
+    sfctx.putImageData(simg, 0, 0);
+    sctx.drawImage(sField, 0, 0, sliceCv.width, sliceCv.height);
+    drawTrails(sctx, sliceCv.width, sliceCv.height);
+    sliceTex.needsUpdate = true;
+  }
+  // color legend
+  const dpr = devicePixelRatio, lx = W - 22 * dpr, ly = 34 * dpr, lh = H - 70 * dpr;
+  for (let k = 0; k < lh; k++) {
+    const c = Sim.turbo(1 - k / lh);
+    cctx.fillStyle = `rgb(${c[0] | 0},${c[1] | 0},${c[2] | 0})`;
+    cctx.fillRect(lx, ly + k, 10 * dpr, 1.5);
+  }
+  cctx.fillStyle = '#e6ecff'; cctx.font = `${11 * dpr}px system-ui`; cctx.textAlign = 'right';
+  for (let v = 0; v <= V_SCALE; v++) cctx.fillText(v + '', lx - 4 * dpr, ly + lh * (1 - v / V_SCALE) + 4 * dpr);
+  cctx.fillText('m/s', lx + 10 * dpr, ly + lh + 16 * dpr);
+  cctx.textAlign = 'left'; cctx.fillStyle = '#8fa3cf';
+  cctx.fillText(`air past object: ${vRel.toFixed(2)} m/s  ↑   ·   slice is 60 cm × 40 cm`, 10 * dpr, H - 10 * dpr);
+}
+
+// particle trails, batched into color bins
+function drawTrails(cctx, W, H) {
+  const sx = W / LW, sy = H / LH;
+  const BINS = 14;
+  cctx.lineWidth = Math.max(1, devicePixelRatio * 0.9);
+  for (let b = 0; b < BINS; b++) {
+    const c = Sim.turbo((b + 0.5) / BINS);
+    cctx.strokeStyle = `rgba(${c[0] | 0},${c[1] | 0},${c[2] | 0},0.85)`;
+    cctx.beginPath();
+    for (let i = 0; i < NP2; i++) {
+      const bi = Math.min(BINS - 1, Math.floor(pv[i] / V_SCALE * BINS));
+      if (bi !== b) continue;
+      let k = (trHead + 1) % TR, x0 = tr[(i * TR + k) * 2], y0 = tr[(i * TR + k) * 2 + 1];
+      cctx.moveTo(x0 * sx, (LH - y0) * sy);
+      for (let s = 1; s < TR; s++) {
+        k = (k + 1) % TR;
+        const x1 = tr[(i * TR + k) * 2], y1 = tr[(i * TR + k) * 2 + 1];
+        if (Math.abs(x1 - x0) > LW / 2) cctx.moveTo(x1 * sx, (LH - y1) * sy);
+        else cctx.lineTo(x1 * sx, (LH - y1) * sy);
+        x0 = x1;
+      }
+    }
+    cctx.stroke();
+  }
+}
+
+// ---------------- state ----------------
+let shape = null, P = null, drop = null, rng = Math.random, slow = false, follow = true;
+let sliceOn = true;
+const sliceTex = new THREE.CanvasTexture(sliceCv);
+sliceTex.colorSpace = THREE.SRGBColorSpace;
+const slicePlane = new THREE.Mesh(new THREE.PlaneGeometry(LW * CELL, LH * CELL),
+  new THREE.MeshBasicMaterial({ map: sliceTex, transparent: true, opacity: 0.95, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false }));
+scene.add(slicePlane);
+let mcHist = null, mcSweep = null;
+
+function params() {
+  const n = val('n');
+  return { n, m: n * Sim.FILTER_MASS, cd: val('cd'), body: shape.body, bend: val('bend'), air: val('air'), height: val('height') };
+}
+function sigmas() { return { tilt: val('tilt'), spin: val('spin'), yaw: val('yaw') }; }
+
+function rebuild() {
+  const kind = $('shape').value;
+  shape = buildShape(kind, val('n'));
+  shapePts = shape.pts;
+  if (objMesh) { pivot.remove(objMesh); objMesh.geometry.dispose(); }
+  objMesh = new THREE.Mesh(shape.geo, gradMat);
+  objMesh.position.y = -shape.h / 2;
+  gradMat.uniforms.uH.value = shape.h;
+  pivot.add(objMesh);
+  lastAngle = 1e9;
+  P = params();
+  resetDrop();
+}
+
+function resetDrop() {
+  drop = null; trailN = 0; trailGeo.setDrawRange(0, 0); landRing.visible = false;
+  P = params();
+  pivot.position.set(0, P.height + shape.h / 2, 0);
+  pivot.rotation.set(0, 0, 0);
+}
+
+function onParamChange(k) {
+  if (k === 'n' && $('shape').value === 'filter') { rebuild(); return; }
+  P = params();
+  if (!drop || drop.landed) resetDrop();  // waiting filter jumps to the new height
+}
+
+$('shape').addEventListener('change', () => {
+  const kind = $('shape').value;
+  $('cd').value = PRESETS[kind].cd; $('v-cd').textContent = fmt.cd(PRESETS[kind].cd);
+  rebuild();
+});
+$('upload').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const name = file.name.toLowerCase();
+  try {
+    let geo;
+    if (name.endsWith('.stl')) geo = new STLLoader().parse(await file.arrayBuffer());
+    else {
+      const obj = new OBJLoader().parse(await file.text());
+      const parts = [];
+      obj.updateMatrixWorld(true);
+      obj.traverse((m) => {
+        if (!m.isMesh) return;
+        let g = m.geometry.index ? m.geometry.toNonIndexed() : m.geometry.clone();
+        g.applyMatrix4(m.matrixWorld);
+        parts.push(g.attributes.position.array);
+      });
+      const len = parts.reduce((a, b) => a + b.length, 0);
+      const all = new Float32Array(len);
+      let o = 0;
+      for (const a of parts) { all.set(a, o); o += a.length; }
+      geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.BufferAttribute(all, 3));
+    }
+    if (!geo.attributes.position || geo.attributes.position.count < 3) throw new Error('no triangles found');
+    customGeo = geo;
+    const opt = $('shape').querySelector('option[value=custom]');
+    opt.disabled = false; opt.textContent = 'Custom: ' + file.name;
+    $('shape').value = 'custom';
+    $('cd').value = PRESETS.custom.cd; $('v-cd').textContent = fmt.cd(PRESETS.custom.cd);
+    rebuild();
+  } catch (err) {
+    $('mcStatus').textContent = 'Could not load model: ' + err.message;
+  }
+});
+
+$('drop').onclick = () => {
+  resetDrop();
+  rng = Math.random;
+  drop = Sim.createDrop(P, Sim.drawRelease(sigmas(), rng));
+};
+$('reset').onclick = resetDrop;
+$('slow').onclick = () => { slow = !slow; $('slow').classList.toggle('on', slow); };
+$('follow').onclick = () => { follow = !follow; $('follow').classList.toggle('on', follow); };
+$('slicebtn').onclick = () => { sliceOn = !sliceOn; $('slicebtn').classList.toggle('on', sliceOn); slicePlane.visible = sliceOn; };
+
+// ---------------- charts ----------------
+function sizeCanvas(c) {
+  const r = c.getBoundingClientRect(), d = devicePixelRatio;
+  if (c.width !== Math.round(r.width * d) || c.height !== Math.round(r.height * d)) {
+    c.width = Math.round(r.width * d); c.height = Math.round(r.height * d);
+  }
+}
+function axes(ctx, W, H, pad, xmax, ymax, xlab, ylab, xt, yt) {
+  const d = devicePixelRatio;
+  ctx.strokeStyle = '#23396b'; ctx.fillStyle = '#8fa3cf'; ctx.lineWidth = d;
+  ctx.font = `${10.5 * d}px system-ui`;
+  ctx.textAlign = 'right';
+  for (let v = 0; v <= ymax + 1e-9; v += yt) {
+    const y = H - pad.b - (H - pad.t - pad.b) * v / ymax;
+    ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(W - pad.r, y); ctx.stroke();
+    ctx.fillText(+v.toFixed(2) + '', pad.l - 5 * d, y + 3.5 * d);
+  }
+  ctx.textAlign = 'center';
+  for (let v = 0; v <= xmax + 1e-9; v += xt) {
+    const x = pad.l + (W - pad.l - pad.r) * v / xmax;
+    ctx.fillText(+v.toFixed(2) + '', x, H - pad.b + 14 * d);
+  }
+  ctx.fillText(xlab, (pad.l + W - pad.r) / 2, H - 6 * d);
+  ctx.save(); ctx.translate(12 * d, (pad.t + H - pad.b) / 2); ctx.rotate(-Math.PI / 2); ctx.fillText(ylab, 0, 0); ctx.restore();
+}
+function niceStep(max) { const r = max / 5, p = 10 ** Math.floor(Math.log10(r)); return [1, 2, 5, 10].map((m) => m * p).find((s) => s >= r); }
+
+function drawHist() {
+  const c = $('hist'); sizeCanvas(c);
+  const ctx = c.getContext('2d'), W = c.width, H = c.height, d = devicePixelRatio;
+  ctx.clearRect(0, 0, W, H);
+  const pad = { l: 44 * d, r: 14 * d, t: 30 * d, b: 34 * d };
+  if (!mcHist) {
+    ctx.fillStyle = '#8fa3cf'; ctx.font = `${12 * d}px system-ui`; ctx.textAlign = 'center';
+    ctx.fillText('Press "Run Monte Carlo" to drop it 100 times', W / 2, H / 2);
+    return;
+  }
+  const land = mcHist.map((r) => r.tilt), rel = mcHist.map((r) => r.release);
+  const sorted = [...land, ...rel].sort((a, b) => a - b);
+  const xmax = Math.max(5, Math.ceil(sorted[Math.floor(sorted.length * 0.98)] / 5) * 5);
+  const NB = 20, bw = xmax / NB;
+  const bins = (arr) => { const b = new Array(NB).fill(0); for (const v of arr) b[Math.min(NB - 1, Math.floor(v / bw))]++; return b; };
+  const bl = bins(land), br = bins(rel);
+  const ymax = Math.max(...bl, ...br) * 1.15;
+  axes(ctx, W, H, pad, xmax, ymax, 'tilt angle at landing (°)', 'drops', niceStep(xmax), niceStep(ymax));
+  const X = (v) => pad.l + (W - pad.l - pad.r) * v / xmax, Y = (v) => H - pad.b - (H - pad.t - pad.b) * v / ymax;
+  ctx.fillStyle = 'rgba(111,211,255,0.75)';
+  bl.forEach((v, i) => ctx.fillRect(X(i * bw) + d, Y(v), X(bw) - X(0) - 2 * d, Y(0) - Y(v)));
+  ctx.strokeStyle = '#ffb35c'; ctx.lineWidth = 1.5 * d; ctx.beginPath();
+  br.forEach((v, i) => { ctx.lineTo(X(i * bw), Y(v)); ctx.lineTo(X((i + 1) * bw), Y(v)); });
+  ctx.stroke();
+  const sl = Sim.stats(land), sr = Sim.stats(rel), st = Sim.stats(mcHist.map((r) => r.yaw)), sd = Sim.stats(mcHist.map((r) => r.drift));
+  ctx.textAlign = 'right'; ctx.font = `${11 * d}px system-ui`;
+  ctx.fillStyle = '#6fd3ff'; ctx.fillText(`landing tilt ${sl.mean.toFixed(1)} ± ${sl.sd.toFixed(1)}°`, W - pad.r, pad.t - 12 * d + 14 * d);
+  ctx.fillStyle = '#ffb35c'; ctx.fillText(`release tilt ${sr.mean.toFixed(1)} ± ${sr.sd.toFixed(1)}°`, W - pad.r, pad.t + 16 * d);
+  ctx.fillStyle = '#8fa3cf'; ctx.fillText(`twist ${st.mean.toFixed(0)}° · drift ${sd.mean.toFixed(1)} cm`, W - pad.r, pad.t + 30 * d);
+}
+
+const SWEEP_N = [4, 8, 12, 16, 20], SWEEP_S = [0, 2, 4, 6, 8, 10, 12, 14, 16];
+const N_COLORS = ['#ffe08a', '#ffb35c', '#ff7a6b', '#d65db1', '#8a6cff'];
+function drawSweep() {
+  const c = $('sweep'); sizeCanvas(c);
+  const ctx = c.getContext('2d'), W = c.width, H = c.height, d = devicePixelRatio;
+  ctx.clearRect(0, 0, W, H);
+  const pad = { l: 44 * d, r: 14 * d, t: 30 * d, b: 34 * d };
+  if (!mcSweep) {
+    ctx.fillStyle = '#8fa3cf'; ctx.font = `${12 * d}px system-ui`; ctx.textAlign = 'center';
+    ctx.fillText('Sweeps release σ for 4, 8, 12, 16, 20 filters', W / 2, H / 2);
+    return;
+  }
+  let ymax = 0;
+  for (const row of mcSweep) for (const p of row) if (p) ymax = Math.max(ymax, p.mean + p.sd);
+  ymax = Math.max(5, Math.ceil(ymax / 5) * 5);
+  const xmax = 16;
+  axes(ctx, W, H, pad, xmax, ymax, 'release tilt σ (°)', 'landing tilt (°)', 2, niceStep(ymax));
+  const X = (v) => pad.l + (W - pad.l - pad.r) * v / xmax, Y = (v) => H - pad.b - (H - pad.t - pad.b) * v / ymax;
+  // reference: mean |tilt| of a 2D normal with σ is σ·√(π/2)
+  ctx.setLineDash([4 * d, 4 * d]); ctx.strokeStyle = '#5d74a8'; ctx.lineWidth = d; ctx.beginPath();
+  ctx.moveTo(X(0), Y(0)); ctx.lineTo(X(xmax), Y(Math.min(ymax, xmax * 1.2533))); ctx.stroke(); ctx.setLineDash([]);
+  mcSweep.forEach((row, ni) => {
+    ctx.strokeStyle = N_COLORS[ni]; ctx.fillStyle = N_COLORS[ni]; ctx.lineWidth = 2 * d;
+    ctx.beginPath();
+    row.forEach((p, si) => { if (p) ctx.lineTo(X(SWEEP_S[si]), Y(p.mean)); });
+    ctx.stroke();
+    row.forEach((p, si) => { if (p) { ctx.beginPath(); ctx.arc(X(SWEEP_S[si]), Y(p.mean), 2.6 * d, 0, 7); ctx.fill(); } });
+  });
+  ctx.font = `${11 * d}px system-ui`; ctx.textAlign = 'left';
+  SWEEP_N.forEach((n, i) => { ctx.fillStyle = N_COLORS[i]; ctx.fillText(`${n} filters`, pad.l + 8 * d, pad.t + 4 * d + i * 14 * d); });
+  ctx.fillStyle = '#5d74a8'; ctx.fillText('- - landing = release', pad.l + 8 * d, pad.t + 4 * d + 5 * 14 * d);
+}
+
+$('mc').onclick = () => {
+  const btn = $('mc'); btn.disabled = true;
+  const base = params(), sig = sigmas();
+  mcHist = Sim.monteCarlo(base, sig, 200, 1234);
+  drawHist();
+  mcSweep = SWEEP_N.map(() => SWEEP_S.map(() => null));
+  const jobs = [];
+  SWEEP_N.forEach((n, ni) => SWEEP_S.forEach((s, si) => jobs.push([ni, si, n, s])));
+  let j = 0;
+  const kind = $('shape').value;
+  const work = () => {
+    const t0 = performance.now();
+    while (j < jobs.length && performance.now() - t0 < 30) {
+      const [ni, si, n, s] = jobs[j++];
+      const body = kind === 'filter' ? filterBody(n).body : base.body;
+      const Pn = { ...base, n, m: n * Sim.FILTER_MASS, body };
+      const res = Sim.monteCarlo(Pn, { ...sig, tilt: s }, 100, 99 + j);
+      mcSweep[ni][si] = Sim.stats(res.map((r) => r.tilt));
+    }
+    $('mcStatus').textContent = j < jobs.length ? `Simulating… ${Math.round(100 * j / jobs.length)}%` : `Done: ${jobs.length * 100 + 200} simulated drops.`;
+    drawSweep();
+    if (j < jobs.length) setTimeout(work, 0); else btn.disabled = false;
+  };
+  work();
+};
+
+// ---------------- loop ----------------
+function resize() {
+  const r = host.getBoundingClientRect();
+  renderer.setSize(r.width, r.height, false);
+  renderer.domElement.style.width = '100%'; renderer.domElement.style.height = '100%';
+  camera.aspect = r.width / Math.max(1, r.height); camera.updateProjectionMatrix();
+  sizeCanvas(cfd); drawHist(); drawSweep();
+}
+addEventListener('resize', resize);
+
+const clock = new THREE.Clock();
+function frame() {
+  const dt = Math.min(clock.getDelta(), 0.05);
+  const vt = Sim.terminalVelocity(P);
+  let vRel = vt, angle = 0;
+  if (drop) {
+    if (!drop.landed) {
+      const simDt = dt * (slow ? 0.25 : 1);
+      const steps = Math.max(1, Math.round(simDt / 0.001));
+      for (let k = 0; k < steps && !drop.landed; k++) Sim.stepDrop(drop, P, simDt / steps, rng);
+      if (trailN < TRAIL_MAX) {
+        const pa = trailGeo.attributes.position.array, ca = trailGeo.attributes.color.array;
+        pa[trailN * 3] = drop.x; pa[trailN * 3 + 1] = drop.y + shape.h / 2; pa[trailN * 3 + 2] = drop.z;
+        const col = Sim.turbo(drop.vy / V_SCALE);
+        ca[trailN * 3] = col[0] / 255; ca[trailN * 3 + 1] = col[1] / 255; ca[trailN * 3 + 2] = col[2] / 255;
+        trailN++; trailGeo.setDrawRange(0, trailN);
+        trailGeo.attributes.position.needsUpdate = true; trailGeo.attributes.color.needsUpdate = true;
+      }
+      if (drop.landed) { landRing.visible = true; landRing.position.set(drop.x, 0.002, drop.z); }
+    }
+    vRel = drop.landed ? 0 : Math.max(drop.vy, 0.05);
+    angle = drop.tx;
+    pivot.position.set(drop.x, drop.y + shape.h / 2, drop.z);
+    pivot.rotation.set(drop.tz, drop.yaw, -drop.tx, 'XZY');
+  }
+  if (Math.abs(angle - lastAngle) > 0.004) { lbm.setObstacle(shapePts, angle, CX, CY, CELL); lastAngle = angle; }
+  sizeCanvas(cfd);
+  const toMS = stepFluid(Math.max(vRel, 0.02));
+  drawFluid(toMS, vRel);
+
+  // slice stands in the object's frame, centred where the 2D grid puts the object
+  slicePlane.position.set(pivot.position.x, pivot.position.y + (LH / 2 - CY) * CELL, pivot.position.z);
+  updateAir3(pivot.position, drop && !drop.landed ? Math.max(drop.vy, 0) : 0, dt * (slow ? 0.25 : 1), shape.body);
+  if (follow) {
+    const ty = pivot.position.y;
+    controls.target.y += (ty - controls.target.y) * 0.15;
+    const dy = (ty + 0.5) - camera.position.y;
+    camera.position.y += dy * 0.15;
+  }
+  controls.update();
+  renderer.render(scene, camera);
+
+  const s = drop, r2d = 180 / Math.PI;
+  const Re = Sim.RHO * vRel * 2 * shape.body.R / Sim.MU;
+  $('readout').innerHTML = s
+    ? `<i>t</i> ${s.t.toFixed(2)} s · <i>y</i> ${s.y.toFixed(2)} m<br><i>v</i> ${s.vy.toFixed(2)} m/s · <i>a</i> ${s.ay.toFixed(2)} m/s²<br>`
+      + `<i>tilt</i> ${(Math.hypot(s.tx, s.tz) * r2d).toFixed(1)}° · <i>twist</i> ${(s.yaw * r2d).toFixed(0)}°<br>`
+      + `<i>drift</i> ${(Math.hypot(s.x, s.z) * 100).toFixed(1)} cm · <i>Re</i> ${Re.toFixed(0)}<br>`
+      + `<i>v<sub>t</sub> theory</i> ${vt.toFixed(2)} · <i>sim max</i> ${s.vmax.toFixed(2)} m/s${s.landed ? '<br><b style="color:#ffb35c">landed</b>' : ''}`
+    : `<i>wind-tunnel preview at v<sub>t</sub></i><br><i>v<sub>t</sub> = √(2mg/ρC<sub>d</sub>A)</i> ${vt.toFixed(2)} m/s<br><i>m</i> ${(P.m * 1000).toFixed(1)} g · <i>A</i> ${(shape.body.A * 1e4).toFixed(0)} cm²<br><i>Re</i> ${Re.toFixed(0)}`;
+  requestAnimationFrame(frame);
+}
+
+rebuild();
+resize();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
